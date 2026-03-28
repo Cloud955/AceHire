@@ -1,0 +1,25 @@
+{
+  "_comment": "多平台爬虫统一配置文件（当没有通过 SCRAPER_CONFIG 环境变量传入时使用）",
+  "keywords": ["填写你的目标职位", "例如：前端开发", "例如：产品经理"],
+  "cityCode": "101010100",
+  "maxJobs": 25,
+  "headless": true,
+  "cookiesFile": {
+    "boss": "./boss_cookies.json",
+    "lagou": "./lagou_cookies.json",
+    "liepin": "./liepin_cookies.json",
+    "zhaopin": "./zhaopin_cookies.json"
+  },
+  "_cityCodeReference": {
+    "北京": "101010100",
+    "上海": "101020100",
+    "广州": "101280100",
+    "深圳": "101280600",
+    "杭州": "101210100",
+    "成都": "101270100",
+    "武汉": "101200100",
+    "南京": "101190100",
+    "西安": "101110100",
+    "苏州": "101190400"
+  }
+}

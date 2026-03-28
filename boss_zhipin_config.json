@@ -1,0 +1,10 @@
+{
+  "_comment": "BOSS直聘爬虫配置，也可通过 SCRAPER_CONFIG 环境变量覆盖",
+  "keywords": ["填写你的目标职位", "例如：前端开发", "例如：产品经理"],
+  "cityCode": "101010100",
+  "maxJobsPerKeyword": 20,
+  "fetchJobDetail": true,
+  "detailClickLimit": 15,
+  "cookiesFile": "./boss_cookies.json",
+  "headless": false
+}

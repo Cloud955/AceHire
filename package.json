@@ -1,0 +1,20 @@
+{
+  "name": "boss-zhipin-n8n-scraper",
+  "version": "1.0.0",
+  "description": "BOSS直聘职位爬取脚本，供 n8n 工作流调用",
+  "type": "module",
+  "scripts": {
+    "scrape": "node boss_zhipin_scraper.mjs",
+    "server": "node scraper_api_server.mjs",
+    "test": "node boss_zhipin_scraper.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.58.2",
+    "playwright-extra": "^4.3.6",
+    "playwright-extra-plugin-stealth": "^0.0.1",
+    "puppeteer": "^22.0.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-anonymize-ua": "^2.4.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}

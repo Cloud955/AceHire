@@ -1,0 +1,261 @@
+{
+  "name": "多平台智能求职助手",
+  "nodes": [
+    {
+      "id": "a1b2c3d4-0000-0000-0000-000000000000",
+      "name": "读取用户配置",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -140,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://127.0.0.1:3001/profile",
+        "options": {}
+      }
+    },
+    {
+      "id": "a1b2c3d4-0001-0001-0001-000000000001",
+      "name": "每日定时触发",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        100,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 1-5"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0002-0002-0002-000000000002",
+      "name": "配置参数",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        340,
+        300
+      ],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "kw-1",
+              "name": "keywords",
+              "value": "=[\"AI产品经理\", \"产品策划经理\", \"C端产品经理\", \"产品经理\", \"产品运营\"]",
+              "type": "array"
+            },
+            {
+              "id": "city-1",
+              "name": "cityCode",
+              "value": "101010100",
+              "type": "string"
+            },
+            {
+              "id": "maxjobs-1",
+              "name": "maxJobsPerPlatform",
+              "value": 25,
+              "type": "number"
+            },
+            {
+              "id": "resume-1",
+              "name": "userResume",
+              "value": "={{ $('读取用户配置').first().json.resume }}",
+              "type": "string"
+            },
+            {
+              "id": "pref-1",
+              "name": "preferences",
+              "value": "={{ $('读取用户配置').first().json.preferences }}",
+              "type": "string"
+            },
+            {
+              "id": "feishu-appid",
+              "name": "feishuAppId",
+              "value": "请填写你的飞书 App ID，格式：cli_xxxxxxxxxxxxxx",
+              "type": "string"
+            },
+            {
+              "id": "feishu-secret",
+              "name": "feishuAppSecret",
+              "value": "请填写你的飞书 App Secret",
+              "type": "string"
+            },
+            {
+              "id": "feishu-token",
+              "name": "feishuAppToken",
+              "value": "请填写你的飞书多维表格 App Token，格式：bascnXXXXXXXXXX",
+              "type": "string"
+            },
+            {
+              "id": "feishu-table",
+              "name": "feishuTableId",
+              "value": "请填写你的飞书多维表格 Table ID，格式：tblXXXXXXXXXX",
+              "type": "string"
+            },
+            {
+              "id": "api-url",
+              "name": "scraperApiUrl",
+              "value": "http://localhost:3001",
+              "type": "string"
+            },
+            {
+              "id": "llm-url",
+              "name": "llmBaseUrl",
+              "value": "https://api.anthropic.com",
+              "type": "string"
+            },
+            {
+              "id": "llm-key",
+              "name": "llmToken",
+              "value": "请填写你的大模型 API Key",
+              "type": "string"
+            },
+            {
+              "id": "llm-model",
+              "name": "llmModel",
+              "value": "claude-sonnet-4-6",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0003-0003-0003-000000000003",
+      "name": "多平台爬取职位",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        580,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const https = require('https');\nconst http = require('http');\nconst cfg = $('配置参数').first().json;\nconst baseUrl = (cfg.scraperApiUrl || 'http://127.0.0.1:3001').replace('localhost', '127.0.0.1');\nconst platforms = ['boss'];\nconst scraperConfig = { keywords: cfg.keywords, cityCode: cfg.cityCode, maxJobs: cfg.maxJobsPerPlatform || 25, headless: true };\n\nfunction httpPost(urlStr, body) {\n  return new Promise((resolve, reject) => {\n    const noProto = urlStr.replace('https://', '').replace('http://', '');\n    const proto = urlStr.startsWith('https') ? 'https' : 'http';\n    const slashIdx = noProto.indexOf('/');\n    const hostPort = slashIdx === -1 ? noProto : noProto.slice(0, slashIdx);\n    const pathname = slashIdx === -1 ? '/' : noProto.slice(slashIdx);\n    const colonIdx = hostPort.indexOf(':');\n    const host = colonIdx === -1 ? hostPort : hostPort.slice(0, colonIdx);\n    const port = colonIdx === -1 ? (proto === 'https' ? 443 : 80) : parseInt(hostPort.slice(colonIdx + 1));\n    const lib = proto === 'https' ? https : http;\n    const options = { hostname: host, port, path: pathname, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } };\n    const req = lib.request(options, res => {\n      let data = '';\n      res.on('data', chunk => data += chunk);\n      res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { resolve([]); } });\n    });\n    req.on('error', reject);\n    req.setTimeout(900000, () => { req.destroy(new Error('timeout')); });\n    req.write(body);\n    req.end();\n  });\n}\n\nconst allJobs = [];\nconst errors = [];\n\nfor (const platform of platforms) {\n  try {\n    const jobs = await httpPost(baseUrl + '/scrape/' + platform, JSON.stringify(scraperConfig));\n    const jobList = Array.isArray(jobs) ? jobs : [];\n    for (const job of jobList) allJobs.push({ ...job, source_platform: job.source || platform });\n    console.log(platform + ' 爬取完成，获取 ' + jobList.length + ' 个职位');\n  } catch (e) {\n    console.log(platform + ' 爬取失败: ' + e.message);\n    errors.push(platform + ': ' + e.message);\n  }\n}\n\nconsole.log('所有平台合计: ' + allJobs.length + ' 个职位');\nif (allJobs.length === 0) return [{ json: { _placeholder: true, message: '所有平台爬取结果为空', errors } }];\nreturn allJobs.map(job => ({ json: job }));"
+      }
+    },
+    {
+      "id": "a1b2c3d4-0004-0004-0004-000000000004",
+      "name": "关键词过滤去重",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        820,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// 关键词过滤 + 去重 + 工作经验筛选（应届/1-3年）\nconst allJobs = $input.all().map(i => i.json);\nconst cfg = $('配置参数').first().json;\nconst keywords = cfg.keywords || [];\n\nconst realJobs = allJobs.filter(j => !j._placeholder);\nif (realJobs.length === 0) {\n  console.log('无真实职位数据，跳过过滤');\n  return [{ json: { _placeholder: true, message: '无职位数据' } }];\n}\n\n// 去重\nconst seen = new Set();\nconst unique = realJobs.filter(job => {\n  const key = (job.job_title || '').trim() + '|' + (job.company_name || '').trim();\n  if (seen.has(key)) return false;\n  seen.add(key);\n  return true;\n});\n\n// 工作经验筛选：保留应届/1-3年，排除明确5年以上\nconst KEEP_EXP = [/应届/, /不限/, /1[-~至到]3年?/, /[123]年/, /1-3/, /2-3/, /校招/, /实习/, /junior/i, /graduate/i];\nconst EXCLUDE_EXP = [/[5-9]年以上/, /10年/, /八年/, /七年/, /六年/, /五年以上/];\nconst expFiltered = unique.filter(job => {\n  const expText = [job._job_experience || '', job.description || '', job.job_title || ''].join(' ');\n  if (EXCLUDE_EXP.some(r => r.test(expText))) return false;\n  const expTag = (job._job_experience || '').trim();\n  if (expTag) return KEEP_EXP.some(r => r.test(expTag));\n  return true;\n});\n\n// 关键词过滤\nconst filtered = keywords.length === 0 ? expFiltered : expFiltered.filter(job => {\n  const text = [job.job_title || '', job.description || '', job.requirements || '', (job._skills || []).join(' ')].join(' ').toLowerCase();\n  return keywords.some(kw => text.includes(kw.toLowerCase()));\n});\n\nconsole.log('去重前: ' + realJobs.length + ' | 去重后: ' + unique.length + ' | 经验筛选后: ' + expFiltered.length + ' | 关键词过滤后: ' + filtered.length);\nif (filtered.length === 0) return [{ json: { _placeholder: true, message: '过滤后无匹配职位' } }];\nreturn filtered.map(job => ({ json: job }));"
+      }
+    },
+    {
+      "id": "a1b2c3d4-0005-0005-0005-000000000005",
+      "name": "LLM匹配评分与简历建议",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1060,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const https = require('https');\nconst http = require('http');\nconst jobs = $input.all().map(i => i.json);\nconst cfg = $('配置参数').first().json;\nconst llmUrl = cfg.llmBaseUrl || 'https://api.anthropic.com';\nconst llmToken = cfg.llmToken;\nconst llmModel = cfg.llmModel || 'claude-sonnet-4-6';\nconst userResume = cfg.userResume || '求职者简历信息未填写';\nconst preferences = cfg.preferences || '';\n\nconst realJobs = jobs.filter(j => !j._placeholder);\nif (realJobs.length === 0) return [{ json: { message: '没有职位需要评分' } }];\n\nfunction httpsPost(urlStr, headers, body) {\n  return new Promise((resolve, reject) => {\n    const noProto = urlStr.replace('https://', '').replace('http://', '');\n    const proto = urlStr.startsWith('https') ? 'https' : 'http';\n    const slashIdx = noProto.indexOf('/');\n    const hostPort = slashIdx === -1 ? noProto : noProto.slice(0, slashIdx);\n    const pathname = slashIdx === -1 ? '/' : noProto.slice(slashIdx);\n    const colonIdx = hostPort.indexOf(':');\n    const host = colonIdx === -1 ? hostPort : hostPort.slice(0, colonIdx);\n    const port = colonIdx === -1 ? (proto === 'https' ? 443 : 80) : parseInt(hostPort.slice(colonIdx + 1));\n    const lib = proto === 'https' ? https : http;\n    const options = { hostname: host, port, path: pathname, method: 'POST', headers: { ...headers, 'Content-Length': Buffer.byteLength(body) } };\n    const req = lib.request(options, res => {\n      let data = '';\n      res.on('data', chunk => data += chunk);\n      res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { resolve({}); } });\n    });\n    req.on('error', reject);\n    req.setTimeout(180000, () => { req.destroy(new Error('LLM timeout')); });\n    req.write(body);\n    req.end();\n  });\n}\n\nfunction callLLM(prompt, maxTokens) {\n  const body = JSON.stringify({ model: llmModel, max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] });\n  return httpsPost(llmUrl + '/chat/completions', { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + llmToken }, body);\n}\n\nconst MAX_JOBS = Math.min(realJobs.length, 80);\nconst jobsSummary = realJobs.slice(0, MAX_JOBS).map((job, i) => {\n  const desc = (job.description || job.requirements || '').slice(0, 400);\n  return '[' + (i+1) + '] 职位: ' + (job.job_title||'未知') + ' | 公司: ' + (job.company_name||'未知') + ' | 薪资: ' + (job.salary_range||'面议') + ' | 地点: ' + (job.location||'未知') + '\\n描述: ' + (desc||'暂无描述');\n}).join('\\n\\n');\n\nconst scoringPrompt = '你是一位专业的求职顾问和简历优化专家。\\n\\n求职者简历：\\n' + userResume + '\\n\\n求职偏好：\\n' + preferences + '\\n\\n以下是招聘平台职位（共' + MAX_JOBS + '个）：\\n' + jobsSummary + '\\n\\n任务：\\n1. 评估每个职位与求职者的匹配度（0-100分）\\n2. 选出最高的20个职位\\n3. 对每个入选职位提供：\\n   - jd_summary: 该公司最看重的3-5个核心能力/特质（根据JD提炼，50字以内）\\n   - resume_suggestions: 针对求职者当前简历的具体修改建议，必须指出「在简历哪个部分（如：面壁智能实习经历/项目经历/自我评价）增加/修改/突出什么内容」，100-150字，不得泛泛而谈\\n\\n严格按JSON返回（只返回JSON）：\\n{\\n  \\\"top_jobs\\\": [\\n    {\\n      \\\"original_index\\\": 1,\\n      \\\"match_score\\\": 92,\\n      \\\"match_reason\\\": \\\"匹配理由，50字以内\\\",\\n      \\\"jd_summary\\\": \\\"公司最看重的核心能力/特质\\\",\\n      \\\"resume_suggestions\\\": \\\"具体指出在简历哪部分做什么修改\\\"\\n    }\\n  ]\\n}';\n\nlet llmResult = { top_jobs: [] };\ntry {\n  const data = await callLLM(scoringPrompt, 6000);\n  const content = data?.choices?.[0]?.message?.content || '{}';\n  const jsonMatch = content.match(/{[sS]*}/);\n  if (jsonMatch) llmResult = JSON.parse(jsonMatch[0]);\n} catch (e) {\n  console.error('LLM评分调用失败:', e.message);\n  llmResult = { top_jobs: realJobs.slice(0, 20).map((_, i) => ({ original_index: i+1, match_score: 0, match_reason: 'LLM暂不可用', jd_summary: '', resume_suggestions: '请手动查看' })) };\n}\n\nconst enrichedJobs = (llmResult.top_jobs || []).map(t => {\n  const orig = realJobs[(t.original_index||1)-1] || {};\n  return { ...orig, match_score: t.match_score||0, match_reason: t.match_reason||'', jd_summary: t.jd_summary||'', resume_suggestions: t.resume_suggestions||'' };\n}).sort((a, b) => b.match_score - a.match_score);\n\nconsole.log('LLM评分完成，入选: ' + enrichedJobs.length + '个');\n\nlet summaryRecord = null;\nif (realJobs.length >= 100) {\n  console.log('达到100条，触发全局总结...');\n  const allJdTexts = realJobs.slice(0, 100).map((job, i) => '[' + (i+1) + '] ' + (job.job_title||'') + ': ' + (job.description||'').slice(0, 200)).join('\\n');\n  const summaryPrompt = '以下是100条招聘岗位的JD摘要：\\n' + allJdTexts + '\\n\\n求职者简历：\\n' + userResume + '\\n\\n请完成两个任务：\\n1. 总结这批岗位普遍最看重的5-8个核心特质/能力（按频次排序，每条20字以内）\\n2. 根据这些高频需求，推荐3-5个适合求职者现在学习/实践的具体项目方向（说明项目名称、学习平台/资源、与岗位需求的关联）\\n\\n按JSON返回：\\n{\\n  \\\"market_insights\\\": [\\\"特质1\\\", \\\"特质2\\\"],\\n  \\\"recommended_projects\\\": [\\n    { \\\"name\\\": \\\"项目名称\\\", \\\"platform\\\": \\\"学习平台/资源\\\", \\\"relevance\\\": \\\"与岗位需求的关联\\\" }\\n  ]\\n}';\n  try {\n    const sumData = await callLLM(summaryPrompt, 3000);\n    const sumContent = sumData?.choices?.[0]?.message?.content || '{}';\n    const sumMatch = sumContent.match(/{[sS]*}/);\n    if (sumMatch) {\n      const sumResult = JSON.parse(sumMatch[0]);\n      summaryRecord = {\n        _is_summary: true,\n        job_title: '【市场洞察总结】',\n        company_name: '系统生成',\n        match_score: 0,\n        match_reason: '',\n        jd_summary: '市场高频需求: ' + (sumResult.market_insights || []).join('、'),\n        resume_suggestions: '推荐学习项目:\\n' + (sumResult.recommended_projects || []).map(p => '・' + p.name + '（' + p.platform + '）- ' + p.relevance).join('\\n'),\n        salary_range: '', location: '', application_url: '', source: 'system',\n      };\n      console.log('全局总结生成成功');\n    }\n  } catch (e) { console.error('全局总结调用失败:', e.message); }\n}\n\nconst output = enrichedJobs.map(job => ({ json: job }));\nif (summaryRecord) output.push({ json: summaryRecord });\nreturn output;"
+      }
+    },
+    {
+      "id": "a1b2c3d4-0006-0006-0006-000000000006",
+      "name": "同步至飞书多维表格",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const https = require('https');\nconst jobs = $input.all().map(i => i.json).filter(j => !j._placeholder && j.job_title);\nconst cfg = $('配置参数').first().json;\nconst { feishuAppId, feishuAppSecret, feishuAppToken, feishuTableId } = cfg;\n\nif (jobs.length === 0) return [{ json: { success: false, message: '无有效职位数据' } }];\n\nfunction httpsPost(urlStr, token, body) {\n  return new Promise((resolve, reject) => {\n    const noProto = urlStr.replace('https://', '').replace('http://', '');\n    const slashIdx = noProto.indexOf('/');\n    const hostPort = slashIdx === -1 ? noProto : noProto.slice(0, slashIdx);\n    const pathname = slashIdx === -1 ? '/' : noProto.slice(slashIdx);\n    const colonIdx = hostPort.indexOf(':');\n    const host = colonIdx === -1 ? hostPort : hostPort.slice(0, colonIdx);\n    const port = colonIdx === -1 ? 443 : parseInt(hostPort.slice(colonIdx + 1));\n    const headers = { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) };\n    if (token) headers['Authorization'] = 'Bearer ' + token;\n    const options = { hostname: host, port, path: pathname, method: 'POST', headers };\n    const req = https.request(options, res => {\n      let data = '';\n      res.on('data', chunk => data += chunk);\n      res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { resolve({}); } });\n    });\n    req.on('error', reject);\n    req.write(body);\n    req.end();\n  });\n}\n\nlet accessToken;\ntry {\n  const tokenData = await httpsPost('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', null, JSON.stringify({ app_id: feishuAppId, app_secret: feishuAppSecret }));\n  accessToken = tokenData.tenant_access_token;\n  if (!accessToken) throw new Error('获取Token失败: ' + JSON.stringify(tokenData));\n  console.log('飞书Token获取成功');\n} catch (e) {\n  console.error('飞书授权失败:', e.message);\n  return [{ json: { success: false, error: e.message } }];\n}\n\nconst todayTs = Date.now();\nconst records = jobs.map(job => ({\n  fields: {\n    '职位名称': job.job_title || '未知',\n    '公司名称': job.company_name || '未知',\n    '招聘平台': job.source_platform || job.source || '未知',\n    '薪资范围': job.salary_range || '面议',\n    '匹配度评分': String(job.match_score || 0),\n    '匹配理由': job.match_reason || '',\n    '岗位核心要求': job.jd_summary || '',\n    '简历修改建议': job.resume_suggestions || '',\n    '职位链接': job.application_url ? { link: job.application_url, text: job.job_title || '' } : { link: '', text: '' },\n    '采集日期': todayTs,\n  }\n}));\n\nconst results = [];\nfor (let i = 0; i < records.length; i += 100) {\n  const batch = records.slice(i, i + 100);\n  try {\n    const r = await httpsPost('https://open.feishu.cn/open-apis/bitable/v1/apps/' + feishuAppToken + '/tables/' + feishuTableId + '/records/batch_create', accessToken, JSON.stringify({ records: batch }));\n    results.push(r);\n    console.log('批次写入 ' + batch.length + ' 条，code: ' + r.code);\n  } catch (e) { console.error('批次写入失败:', e.message); }\n}\n\nreturn [{ json: { success: true, synced_count: jobs.length, feishu_results: results } }];"
+      }
+    }
+  ],
+  "connections": {
+    "读取用户配置": {
+      "main": [
+        [
+          {
+            "node": "配置参数",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "每日定时触发": {
+      "main": [
+        [
+          {
+            "node": "读取用户配置",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "配置参数": {
+      "main": [
+        [
+          {
+            "node": "多平台爬取职位",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "多平台爬取职位": {
+      "main": [
+        [
+          {
+            "node": "关键词过滤去重",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "关键词过滤去重": {
+      "main": [
+        [
+          {
+            "node": "LLM匹配评分与简历建议",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM匹配评分与简历建议": {
+      "main": [
+        [
+          {
+            "node": "同步至飞书多维表格",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  }
+}
